@@ -1,4 +1,5 @@
-import { promises as fs } from "fs";
+import { promises as fsPromises } from 'fs';
+import * as fs from 'fs';
 import { Canvas, createCanvas, Image, loadImage } from "canvas";
 import { parse } from "fast-xml-parser";
 import { exec, execFile } from 'child_process'
@@ -9,17 +10,50 @@ const args = argv.slice(2);
 const sheets = new Map<string, SpriteAtlas>();
 const atlases: UnityAtlas[] = []
 
+const cli_params = {
+	"ar": undefined,
+	"resources": undefined,
+	"dest": undefined
+}
+
 let configURL = "./config.json"
+let defaultConfig = "./default_config.json"
 
 for (let i = 0; i < args.length; i += 2) {
     const command = args[i];
     const value = args[i + 1];
 
     switch (command) {
-        case "-config":
+        case "--config":
             configURL = value;
             break;
+		case "--ar":
+			cli_params["ar"] = value;
+			break;
+		case "--resources":
+			cli_params["resources"] = value
+			break;
+		case "--dest":
+			cli_params["dest"] = value
+			break;
     }
+}
+
+let defaultParams = JSON.parse(fs.readFileSync(defaultConfig, "utf-8"))
+Object.keys(cli_params).forEach(function(key) {
+    if ( cli_params[key] === undefined ) cli_params[key] = defaultParams[key];
+});
+
+let missing = [];
+Object.keys(cli_params).forEach(function(key) {
+    if ( cli_params[key] === undefined ) missing.push("--" + key);
+});
+
+if ( missing.length > 0 ) {
+	
+	console.log("Missing required arguments: ", missing);
+	process.exit()
+
 }
 
 const atlasMapper = {
@@ -49,8 +83,15 @@ type SpriteData = {
     isT: boolean
 }
 
+let jsonData = fs.readFileSync(configURL, "utf-8")
+Object.keys(cli_params).forEach(function(key) {
+	const regex = new RegExp(`\\[\\[${key}\\]\\]`, "g");
+	jsonData = jsonData.replace(regex, cli_params[key]);
+})
+console.log("config", jsonData)
+const config = JSON.parse(jsonData);
+
 async function main() {
-    const config = JSON.parse(await fs.readFile(configURL, "utf-8"));
 
     if (config.decompile) {
         await decompile(config.decompiler);
@@ -60,7 +101,7 @@ async function main() {
     const manifest = await loadManifest(config.manifestLocation);
     await loadUnityAtlases(config.input);
     
-    const { sprites, animatedSprites } = (JSON.parse(await fs.readFile(`${config.input}/spritesheet.json`, "utf-8")));
+    const { sprites, animatedSprites } = (JSON.parse(await fsPromises.readFile(`${config.input}/spritesheet.json`, "utf-8")));
     
     for (const atlasData of sprites) {
         setSpriteAtlas(atlasData, manifest);
@@ -74,7 +115,7 @@ async function main() {
     const promises = [];
 
     try {
-        await fs.mkdir(`${config.output}`);
+        await fsPromises.mkdir(`${config.output}`);
     } catch {}
 
     sheets.forEach((sheet, key) => {
@@ -102,25 +143,25 @@ async function decompile(options) {
             ]
             
 
-            await fs.mkdir("./data/atlases");
-            await fs.copyFile("./data/ExportedProject/Assets/TextAsset/spritesheet.json", "./data/atlases/spritesheet.json");
+            await fsPromises.mkdir(config.input);
+            await fsPromises.copyFile(`${options.output}/ExportedProject/Assets/TextAsset/spritesheet.json`, `${config.input}/spritesheet.json`);
             await Promise.all(atlases.map((atlas) => {
-                return fs.copyFile(`./data/ExportedProject/Assets/Texture2D/${atlas}`, `./data/atlases/${atlas}`);
+                return fsPromises.copyFile(`${options.output}/ExportedProject/Assets/Texture2D/${atlas}`, `${config.input}/${atlas}`);
             }))
 
-            await fs.mkdir("./data/xml");
+            await fsPromises.mkdir(`${options.output}/xml`);
 
-            const textAssets = await fs.readdir("./data/ExportedProject/Assets/TextAsset");
+            const textAssets = await fsPromises.readdir(`${options.output}/ExportedProject/Assets/TextAsset`);
             await Promise.all(textAssets.map(async (assetPath) => {
-                const src = "./data/ExportedProject/Assets/TextAsset/" + assetPath;
-                const lines = await fs.readFile("./data/ExportedProject/Assets/TextAsset/" + assetPath, {encoding: "ascii"});
+                const src = `${options.output}/ExportedProject/Assets/TextAsset/` + assetPath;
+                const lines = await fsPromises.readFile(`${options.output}/ExportedProject/Assets/TextAsset/` + assetPath, {encoding: "ascii"});
                 if (lines.indexOf(`<?xml version="1.0`) >= 0) {
-                    await fs.copyFile(src, "./data/xml/" + assetPath.replace(".txt", ".xml"));
+                    await fsPromises.copyFile(src, `${options.output}/xml/` + assetPath.replace(".txt", ".xml"));
 
                 }
             }))
 
-            await fs.rm("./data/ExportedProject", { recursive: true })
+            await fsPromises.rm(`${options.output}/ExportedProject`, { recursive: true })
 
             res();
         })
@@ -134,7 +175,7 @@ async function loadUnityAtlases(dir) {
 }
 
 async function loadManifest(dir) {
-    const manifestXML = parse(await fs.readFile(dir, "utf-8"), {
+    const manifestXML = parse(await fsPromises.readFile(dir, "utf-8"), {
         ignoreAttributes: false,
     });
     const manifest = {};
@@ -271,9 +312,9 @@ class SpriteAtlas {
     }
 
     async save(path, name, manifestEntry) {
-        const canvasPromise = fs.writeFile(`${path}/${name}.png`, this.canvas.toBuffer());
+        const canvasPromise = fsPromises.writeFile(`${path}/${name}.png`, this.canvas.toBuffer());
         if (this.maskDrawnTo) {
-            return Promise.all([canvasPromise, fs.writeFile(`${path}/${name}_mask.png`, this.maskCanvas.toBuffer())]);
+            return Promise.all([canvasPromise, fsPromises.writeFile(`${path}/${name}_mask.png`, this.maskCanvas.toBuffer())]);
         }
         return canvasPromise
     }

@@ -1,13 +1,13 @@
 {
     "decompile": true,
     "decompiler": {
-        "exe": "./decompiler/AssetRipperConsole.exe",
-        "input": "path goes here and looks like this: RealmOfTheMadGod\\Production\\RotMG Exalt_Data\\resources.assets",
-        "output": "./data"
+        "exe": "[[ar]]",
+        "input": "[[resources]]",
+        "output": "[[dest]]"
     },
-    "input": "./data/atlases",
-    "output": "./data/sheets",
-    "manifestLocation": "./data/xml/assets_manifest.xml",
+    "input": "[[dest]]/atlases",
+    "output": "[[dest]]/sheets",
+    "manifestLocation": "[[dest]]/xml/assets_manifest.xml",
     "copy": {
         "lofiChar8x8": ["lofiChar"],
         "lofiChar28x8": ["lofiChar2"],
