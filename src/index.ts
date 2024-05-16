@@ -4,6 +4,8 @@ import { Canvas, createCanvas, Image, loadImage } from "canvas";
 import { parse } from "fast-xml-parser";
 import { exec, execFile } from 'child_process'
 import { argv } from 'process';
+import * as flatbuffers from 'flatbuffers';
+import { Deca } from '../schema';
 
 const args = argv.slice(2);
 
@@ -80,7 +82,18 @@ type SpriteData = {
     spriteSheetName?: string;
     direction?: number,
     action?: number,
-    isT: boolean
+    isT: boolean,
+    set?: number
+    padding?: number,
+}
+
+type AnimatedSprite = {
+    index: number,
+    spriteSheetName: string;
+    direction: number,
+    action: number,
+    set: number,
+    spriteData: SpriteData
 }
 
 let jsonData = fs.readFileSync(configURL, "utf-8")
@@ -100,19 +113,116 @@ async function main() {
 
     const manifest = await loadManifest(config.manifestLocation);
     await loadUnityAtlases(config.input);
-    
-    const { sprites, animatedSprites } = (JSON.parse(await fsPromises.readFile(`${config.input}/spritesheet.json`, "utf-8")));
-    
-    for (const atlasData of sprites) {
-        setSpriteAtlas(atlasData, manifest);
+    let file = (await fsPromises.readFile(`${config.input}/spritesheetf.bytes`));
+    let byteBuffer = new flatbuffers.ByteBuffer(file);
+    let root = Deca.SpriteSheetRoot.getRootAsSpriteSheetRoot(byteBuffer);
+
+    // array just for json creation
+    let sprites: SpriteAtlasData[] = [];
+
+    for (let i = 0; i < root.spritesLength(); i++) {
+        let spriteSheet = root.sprites(i);
+        let workingSprites : SpriteData[] = [];
+
+        for (let j = 0; j < spriteSheet.spritesLength(); j++) {
+            let sprite = spriteSheet.sprites(j);
+
+            let spriteData: SpriteData = {
+              //padding: sprite.padding(),
+              index: sprite.index(),
+              aId: Number(sprite.aId()),
+              isT: sprite.isT(),
+              padding: sprite.padding(),
+              spriteSheetName: spriteSheet.name(),
+              position: {
+                  x:sprite.position().x(),
+                  y:sprite.position().y(),
+                  w:sprite.position().w(),
+                  h:sprite.position().h(),
+              },
+              maskPosition: {
+                  x:sprite.maskPosition().x(),
+                  y:sprite.maskPosition().y(),
+                  w:sprite.maskPosition().w(),
+                  h:sprite.maskPosition().h(),
+              },/*
+              mostCommonColor: {
+                r:sprite.mostCommonColor().r(),
+                g:sprite.mostCommonColor().g(),
+                b:sprite.mostCommonColor().b(),
+                a:sprite.mostCommonColor().a(),
+              }*/
+            }
+
+            workingSprites.push(spriteData);
+        }
+
+        let atlasData : SpriteAtlasData = {
+            spriteSheetName: spriteSheet.name(),
+            atlasId: Number(spriteSheet.atlasId()),
+            elements: workingSprites,
+        }
+
+        setSpriteAtlas(atlasData ,manifest);
+        sprites.push(atlasData);
     }
 
-    for (const data of animatedSprites) {
-        //TODO: bandaid fix
-        setAnimated({...data.spriteData, ...data}, manifest);
+    let spritesAnimated: AnimatedSprite[] = [];
+
+    for (let i = 0; i < root.animatedSpritesLength(); i++) {
+        let animatedSprite = root.animatedSprites(i);
+        let sprite = animatedSprite.sprite();
+
+        let animatedSpriteData: AnimatedSprite = {
+            spriteSheetName: animatedSprite.name(),
+            index: animatedSprite.index(),
+            direction: animatedSprite.direction(),
+            action: animatedSprite.action(),
+            set: animatedSprite.set(),
+            spriteData: {
+                spriteSheetName: sprite.spriteSheetName(),
+                index: sprite.index(),
+                padding: sprite.padding(),
+                isT: sprite.isT(),
+                aId: Number(sprite.aId()),
+                direction: animatedSprite.direction(),
+                action: animatedSprite.action(),
+                position: {
+                    x:sprite.position().x(),
+                    y:sprite.position().y(),
+                    w:sprite.position().w(),
+                    h:sprite.position().h(),
+                },
+                maskPosition: {
+                    x:sprite.maskPosition().x(),
+                    y:sprite.maskPosition().y(),
+                    w:sprite.maskPosition().w(),
+                    h:sprite.maskPosition().h(),
+                }
+            }
+        }
+
+        spritesAnimated.push(animatedSpriteData);
+        setAnimated({...animatedSpriteData.spriteData, ...animatedSpriteData}, manifest);
     }
 
+    // save spritesheet as .json (needed?)
+    let temp = {
+        "sprites": sprites,
+        "animatedSprites": spritesAnimated
+    }
     const promises = [];
+
+    const jsonSpriteSheet = JSON.stringify(temp,null,2);
+    const spriteSheetExportPath = './spritesheet.json';
+    fsPromises.writeFile(spriteSheetExportPath, jsonSpriteSheet)
+        .then(() => {
+                console.log(`JSON data has been saved`);
+            })
+            .catch((error) => {
+                console.error(`Error saving JSON data: ${error}`);
+            });
+
 
     try {
         await fsPromises.mkdir(`${config.output}`);
@@ -144,7 +254,7 @@ async function decompile(options) {
             
 
             await fsPromises.mkdir(config.input);
-            await fsPromises.copyFile(`${options.output}/ExportedProject/Assets/TextAsset/spritesheet.json`, `${config.input}/spritesheet.json`);
+            await fsPromises.copyFile(`${options.output}/ExportedProject/Assets/TextAsset/spritesheetf.bytes`, `${config.input}/spritesheetf.bytes`);
             await Promise.all(atlases.map((atlas) => {
                 return fsPromises.copyFile(`${options.output}/ExportedProject/Assets/Texture2D/${atlas}`, `${config.input}/${atlas}`);
             }))
@@ -246,7 +356,7 @@ class UnityAtlas {
 type SpriteAtlasData = {
     spriteSheetName: string;
     atlasId: number;
-    elements: SpriteData[];
+    elements: SpriteData[]|SpriteData;
 }
 
 
@@ -297,7 +407,7 @@ class SpriteAtlas {
         }
 
         if (sheetPos.y + h > this.canvas.height) {
-            this.expandCanvas(this.canvas.height + (this.spriteHeight * 16));
+            this.expandCanvas(sheetPos.y + (this.spriteHeight * 16));
         }
 
         const ctx = this.canvas.getContext("2d");
