@@ -214,7 +214,10 @@ async function main() {
     const promises = [];
 
     const jsonSpriteSheet = JSON.stringify(temp,null,2);
-    const spriteSheetExportPath = './spritesheet.json';
+    const spriteSheetExportPath = './deca.ts
+                                     schema.ts
+                                     deca.js
+                                     schema.jsspritesheet.json';
     fsPromises.writeFile(spriteSheetExportPath, jsonSpriteSheet)
         .then(() => {
                 console.log(`JSON data has been saved`);
